@@ -1,13 +1,14 @@
 
-import terminal, os, math
+import terminal, os, math, options, strformat
+import illwill
 
 let
   height = terminalHeight()
   width  = terminalWidth()
 
-const LINEACC = 6
+const LINEACC = 5
 
-var COUNT = 0
+
 
 #  _   _      _                     
 # | | | | ___| |_ __   ___ _ __ ___ 
@@ -38,9 +39,6 @@ proc join(s: seq[string]): string =
 type Point = object
   x,y,z: int
 
-proc samePlace(a,b: Point): bool =
-  a.x == b.x and a.y == b.y
-
 
 proc newPoint(x,y,z: int): Point = Point(x: x, y: y, z: z)
 
@@ -68,38 +66,6 @@ proc newCuboid(p: array[8, Point]): Cube =
     newTriangle(p[4], p[6], p[5]) #12 -
   ])
 
-# B C 6 5 4
-
-
-
-# Cube(triangles: [
-#     newTriangle(p[0], p[1], p[2]),#1
-#     newTriangle(p[2], p[1], p[3]),#2
-#     newTriangle(p[1], p[5], p[3]),#3
-#     newTriangle(p[5], p[6], p[3]),#4
-#     newTriangle(p[0], p[5], p[1]),#5
-#     newTriangle(p[0], p[4], p[5]),#6
-#     newTriangle(p[0], p[7], p[4]),#7
-#     newTriangle(p[0], p[2], p[7]),#8
-#     newTriangle(p[3], p[7], p[2]),#9
-#     newTriangle(p[3], p[6], p[7]),#10
-#     newTriangle(p[6], p[4], p[7]),#11
-#     newTriangle(p[6], p[5], p[4]) #12
-#   ])
-
-    # newTriangle(p[0], p[1], p[2]),#1
-    # newTriangle(p[2], p[1], p[3]),#2
-    # newTriangle(p[6], p[3], p[1]),#3
-    # newTriangle(p[6], p[1], p[5]),#4
-    # newTriangle(p[4], p[5], p[1]),#5
-    # newTriangle(p[1], p[0], p[4]),#6
-    # newTriangle(p[0], p[7], p[4]),#7
-    # newTriangle(p[0], p[2], p[7]),#8
-    # newTriangle(p[3], p[7], p[2]),#9
-    # newTriangle(p[3], p[6], p[7]),#10
-    # newTriangle(p[6], p[4], p[7]),#11
-    # newTriangle(p[6], p[5], p[4]) #12
-
 
 proc newCube(p: Point, size: int): Cube =
   newCuboid([
@@ -116,16 +82,6 @@ proc newCube(p: Point, size: int): Cube =
     newPoint(p.x     , p.y+size, p.z+size)
   ])
 
-type Vector = object
-  p0,p1: Point
-
-proc newVector(p0,p1: Point): Vector = Vector(p0: p0, p1: p1)
-
-proc `+`(v0,v1: Vector): Vector =
-  newVector(
-    newPoint(v1.p0.x+v0.p0.x, v1.p0.y+v0.p0.y, v1.p0.z+v0.p0.z),
-    newPoint(v1.p1.x+v0.p1.x, v1.p1.y+v0.p1.y, v1.p1.z+v0.p1.z)
-  )
 
 
 #   ____                 _     _          
@@ -141,15 +97,12 @@ type Pixel = ref object
 
 proc newPixel(x,y,z: int, v: char): Pixel = Pixel(loc: newPoint(x,y,z), value: v)
 
-proc compareZ(a: Pixel, b: Pixel): char =
-  if a.loc.z > b.loc.z:
-    return a.value
-  return b.value
-
 type Screen = ref object
   pixels: seq[Pixel]
+  tBuff: TerminalBuffer
 
-proc newScreen(): Screen = Screen(pixels: @[])
+proc newScreen(): Screen =
+  Screen(pixels: @[], tBuff: newTerminalBuffer(width, height))
 
 proc occupiedRows(s: Screen): seq[int] =
   # Returns which rows have pixels on them
@@ -164,7 +117,7 @@ proc pixelsOnRow(s: Screen, n: int): seq[Pixel] =
 # proc `[]=`(s: Screen, w,h,z: int, c: char) =
 #   s.pixels.add(newPixel(w+z,h+z, z, c))
 
-proc `$`(s: Screen): string =
+proc toStringSeq(s: Screen): seq[string] =
   # Turn my weird screen data structure into a string
   var ret = newSeq[string]()
   let usedRows = s.occupiedRows()
@@ -172,38 +125,28 @@ proc `$`(s: Screen): string =
   for i in 0..(height-1):
     var row = ' ' * width
     if i in usedRows:
-      #set pixels on row
       for p in s.pixelsOnRow(i):
-        if p.loc.x < width: row[p.loc.x] = p.value
+        if p.loc.x < width and p.loc.x >= 0: row[p.loc.x] = p.value
     ret.add(row)
 
-  return ret.join()
+  return ret
+
+proc `[]`(s: Screen, x,y,z: int): Option[int] =
+  for i in 0..(s.pixels.len-1):
+    if s.pixels[i].loc.x == x and s.pixels[i].loc.y == y and s.pixels[i].loc.z <= z:
+      return some(i)
 
 proc drawPixel(s: Screen, x,y,z: int, c: char) =
   # sets a point on the screen
-  if x >= 0 and x < width and y >= 0 and y < height:
-    # let
-    #   por = s.pixelsOnRow(y)
-    #   cpoint = newPoint(x,y,z)
-    
-    # for p in por:
-    #   if p.loc.samePlace(cpoint):
-    #     p.value = newPixel(cpoint.x, cpoint.y, cpoint.z, c).compareZ(p)
-    #     return
-    let
-      zz = ((z-1)/3).ceil.toInt
-      yy = (y/2).round.toInt
-    var cc = c
-    if z < COUNT:
-      cc = '.'
-    elif z < COUNT:
-      cc = '+'
-    elif z < COUNT:
-      cc = '*'
-    else:
-      cc = '#'
-
-    s.pixels.add(newPixel(x+zz,yy+zz,z,cc))
+  let
+    az = ((z-1)/3).ceil.toInt
+    px = x + az
+    py = (y/2).round.toInt + az
+    pAlreadyThere = s[px,py,z]
+  if pAlreadyThere.isSome:
+      s.pixels[pAlreadyThere.get()] = newPixel(px,py,z,c)
+  else:
+    s.pixels.add(newPixel(px,py,z,c))
 
 proc drawLine(s: Screen, p0,p1: Point, c: char, n: int) =
   if n == 0:
@@ -228,12 +171,19 @@ proc drawLine(s: Screen, p0,p1: Point, c: char) = s.drawLine(p0,p1,c,LINEACC)
 
 proc clear(s: Screen) =
   # sets the screen to empty space
-  discard execShellCmd("clear")
   s.pixels = newSeq[Pixel]()
+  for i in 0..(height-1):
+    s.tBuff.write(0, i, ' ' * width)
 
 proc display(s: Screen) =
   # Shows the screen on the terminal
-  echo s
+  # for p in s.pixels:
+  #   s.tBuff.write(p.loc.x, p.loc.y, fmt"{p.value}")
+  var h = 0
+  for line in s.toStringSeq():
+    s.tBuff.write(0,h, line)
+    h+=1
+  s.tBuff.display()
 
 proc drawTriangle(s: Screen, t: Triangle, c: char) =
   s.drawLine(t.verts[0], t.verts[1], c)
@@ -259,34 +209,52 @@ proc drawCube(s: Screen, c: Cube, v: char) =
 
 let s = newScreen()
 
-var x = 0
+# s.tBuff.setBackgroundColor(bgBlack)
+s.tBuff.setForegroundColor(illwill.ForegroundColor.fgWhite)
+s.tBuff.setBackgroundColor(illwill.BackgroundColor.bgBlack)
 
 
-# let
-#   cube1 = newCube(newPoint(1,1,1), 18)
-#   cube2 = newCube(newPoint(18,1,1), 18)
-#   cube3 = newCube(newPoint(36,1,1), 18)
+var
+  x = 0
+  y = 0
+  z = 0
+
+proc exitProc() {.noconv.} =
+  illwillDeinit()
+  showCursor()
+  echo x
+  quit(0)
+
+
+
+illwillInit(fullscreen=true)
+setControlCHook(exitProc)
+hideCursor()
 
 
 
 while true:
   s.clear()
   s.drawCube(
-    newCube( newPoint(1, 1, 0),  height-2), '.'
-  )
+    newCube( newPoint(x, y, 0),  height-2), '.' )
   s.display()
-  if COUNT < 80: 
-    COUNT += 3
-  else:
-    COUNT = 0
-  # discard stdin.readLine()
-  sleep(100)
 
+  case getKey():
+    of Key.Q:
+      exitProc()
+    of Key.Right:
+      x += 5
+    of Key.Left:
+      x -= 5
+    of Key.Up:
+      y -= 5
+    of Key.Down:
+      y += 5
+    of Key.A:
+      z += 5
+    of Key.B:
+      z -= 5
+    else:
+      discard
 
-
-
-# s.drawCube(cube3, '.')
-# s.drawCube(cube2, '.')
-# s.drawCube(cube1, '.')
-
-
+  sleep(20)
