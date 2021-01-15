@@ -1,12 +1,12 @@
 
-import terminal, os, math, options, strformat
+import terminal, os, math, options, strutils
 import illwill
 
 let
   height = terminalHeight()
   width  = terminalWidth()
 
-const LINEACC = 5
+const LINEACC = 7
 
 
 
@@ -22,11 +22,6 @@ proc `*`(c: char, n: int): string =
   for i in 0..(n-1):
     result &= c
 
-proc join(s: seq[string]): string =
-  for i in 0..(s.len-2):
-    result &= (s[i] & "\n")
-  return result & s[s.len-1]
-
 
 #   ____                           _              
 #  / ___| ___  ___  _ __ ___   ___| |_ _ __ _   _ 
@@ -36,11 +31,12 @@ proc join(s: seq[string]): string =
 #                                           |___/ 
 
 
-type Point = object
+type Point = ref object
   x,y,z: int
+  shifted: bool
 
 
-proc newPoint(x,y,z: int): Point = Point(x: x, y: y, z: z)
+proc newPoint(x,y,z: int): Point = Point(x: x, y: y, z: z, shifted: false)
 
 type Triangle = object
   verts: array[3, Point]
@@ -49,6 +45,47 @@ proc newTriangle(a,b,c: Point): Triangle = Triangle(verts: [a,b,c])
 
 type Cube = object
   triangles: array[12, Triangle]
+
+type Model = object
+  triangles: seq[Triangle]
+
+proc loadModel(data: string, xs,ys,zs: int): Model =
+  var
+    points = newSeq[Point]()
+    tris   = newSeq[Triangle]()
+  for line in data.strip.splitLines():
+    case line[0]:
+      of 'v':
+        let
+          vertexes = line.split(" ")
+          x = (vertexes[1].parseFloat() * 25).round.toInt + xs
+          y = (vertexes[2].parseFloat() * 25).round.toInt + ys
+          z = (vertexes[3].parseFloat() * 25).round.toInt + zs
+
+        points.add( newPoint(x,y,z) )
+      of 'f':
+        let
+          pts = line.split(" ")
+          p1 = pts[1].parseInt() - 1
+          p2 = pts[2].parseInt() - 1
+          p3 = pts[3].parseInt() - 1
+
+        tris.add( newTriangle( points[p1], points[p2], points[p3]) )
+      else:
+        discard
+  return Model(triangles: tris)
+
+proc translateModel(m: Model, x,y,z: int) =
+  for t in m.triangles:
+    for v in t.verts:
+      if not v.shifted:
+        v.x += x
+        v.y += y
+        v.z += z
+        v.shifted = true
+  for t in m.triangles:
+    for v in t.verts:
+      v.shifted = false
 
 proc newCuboid(p: array[8, Point]): Cube =
   Cube(triangles: [
@@ -78,10 +115,54 @@ proc newCube(p: Point, size: int): Cube =
     #bottom
     newPoint(p.x     , p.y+size, p.z),
     newPoint(p.x+size, p.y+size, p.z),
-    newPoint(p.x+size, p.y+size, p.z+size),
+    newPoint(p.x+size, p.y+size, p.z+size), #7
     newPoint(p.x     , p.y+size, p.z+size)
   ])
 
+proc translateCube(c: Cube, x,y,z: int) =
+  for t in c.triangles:
+    for v in t.verts:
+      if not v.shifted:
+        v.x += x
+        v.y += y
+        v.z += z
+        v.shifted = true
+  for t in c.triangles:
+    for v in t.verts:
+      v.shifted = false
+
+proc rotateCube(c: Cube, theta: float) =
+  var
+    point1 = c.triangles[0].verts[0]
+    point7 = c.triangles[3].verts[1]
+    center1 = newPoint(
+      ((point1.x + point7.x)/2).toInt,
+      ((point1.y + point7.y)/2).toInt,
+      ((point1.z + point7.z)/2).toInt)
+  for t in c.triangles:
+    for v in t.verts:
+      if not v.shifted:
+        let
+          xrot = ( v.x.float * cos(theta) ) - ( v.z.float * sin(theta) )
+          zrot = ( v.x.float * sin(theta) ) + ( v.z.float * cos(theta) )
+        v.x = xrot.toInt
+        v.z = zrot.toInt
+        v.shifted = true
+  
+  point1 = c.triangles[0].verts[0]
+  point7 = c.triangles[3].verts[1]
+
+  let center2 = newPoint(
+    ((point1.x + point7.x)/2).toInt,
+    ((point1.y + point7.y)/2).toInt,
+    ((point1.z + point7.z)/2).toInt)
+
+  # reset points
+  for t in c.triangles:
+    for v in t.verts:
+      v.shifted = false
+  
+  c.translateCube(center1.x-center2.x, center1.y-center2.y, center1.z-center2.z)
 
 
 #   ____                 _     _          
@@ -136,17 +217,31 @@ proc `[]`(s: Screen, x,y,z: int): Option[int] =
     if s.pixels[i].loc.x == x and s.pixels[i].loc.y == y and s.pixels[i].loc.z <= z:
       return some(i)
 
+# proc drawPixel(s: Screen, x,y,z: int, c: char) =
+#   # sets a point on the screen
+#   let
+#     az = ((z-1)/3).ceil.toInt
+#     px = x + az
+#     py = (y/2).round.toInt + az
+#     pAlreadyThere = s[px,py,z]
+#   if pAlreadyThere.isSome:
+#       s.pixels[pAlreadyThere.get()] = newPixel(px,py,z,c)
+#   else:
+#     s.pixels.add(newPixel(px,py,z,c))
+
 proc drawPixel(s: Screen, x,y,z: int, c: char) =
-  # sets a point on the screen
   let
-    az = ((z-1)/3).ceil.toInt
-    px = x + az
-    py = (y/2).round.toInt + az
-    pAlreadyThere = s[px,py,z]
-  if pAlreadyThere.isSome:
-      s.pixels[pAlreadyThere.get()] = newPixel(px,py,z,c)
-  else:
-    s.pixels.add(newPixel(px,py,z,c))
+    aspectRatio = width/height
+    fieldOfView = 1.0 / tan(degToRad(90.0) * 0.5)*100
+    zfar = -1000.0
+    znear = 1000.0
+    q = zfar / (zfar - znear)
+    tx = (aspectRatio.float*fieldOfView*x.float)/(z.float*2)
+    ty = (fieldOfView*y.float)/z.float 
+    tz = (z.float*q - znear*q).float/z.float
+
+  s.pixels.add( newPixel(tx.toInt,ty.toInt,tz.toInt, c) )
+
 
 proc drawLine(s: Screen, p0,p1: Point, c: char, n: int) =
   if n == 0:
@@ -194,10 +289,13 @@ proc drawTriangle(s: Screen, t: Triangle, c: char) =
   #   s.drawPixel(p.x, p.y, p.z, c)
 
 proc drawCube(s: Screen, c: Cube, v: char) =
-  # var ass = @['C', 'B', 'A', '9', '8', '7', '6', '5', '4', '3', '2', '1']
   for t in c.triangles:
     s.drawTriangle(t, v)
 
+
+proc drawModel(s: Screen, m: Model, v: char) =
+  for t in m.triangles:
+    s.drawTriangle(t, v)
 
 #  __  __       _       
 # |  \/  | __ _(_)_ __  
@@ -222,7 +320,6 @@ var
 proc exitProc() {.noconv.} =
   illwillDeinit()
   showCursor()
-  echo x
   quit(0)
 
 
@@ -231,29 +328,41 @@ illwillInit(fullscreen=true)
 setControlCHook(exitProc)
 hideCursor()
 
+# var m = loadModel(readFile("VideoShip.obj"), 120, 80, 180)
+
+var myCube = newCube( newPoint(60+x, 10+y, z+120),  height-2)
 
 
 while true:
   s.clear()
-  s.drawCube(
-    newCube( newPoint(x, y, 0),  height-2), '.' )
+  
+  s.drawCube(myCube, '.')
+  myCube.rotateCube(degToRad(5.0))
+  # s.drawModel(m, '.')
+
   s.display()
 
   case getKey():
     of Key.Q:
       exitProc()
     of Key.Right:
-      x += 5
+      # m.translateModel(10,0,0)
+      x+=5
     of Key.Left:
-      x -= 5
+      # m.translateModel(-10,0,0)
+      x-=5
     of Key.Up:
-      y -= 5
+      # m.translateModel(0,-10,0)
+      y-=5
     of Key.Down:
-      y += 5
+      # m.translateModel(0,10,0)
+      y+=5
     of Key.A:
-      z += 5
+      # m.translateModel(0,0,-10)
+      z-=5
     of Key.B:
-      z -= 5
+      # m.translateModel(0,0,10)
+      z+=5
     else:
       discard
 
